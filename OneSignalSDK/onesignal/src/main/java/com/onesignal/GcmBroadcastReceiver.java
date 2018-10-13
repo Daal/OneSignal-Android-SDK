@@ -41,7 +41,7 @@ import android.support.v4.content.WakefulBroadcastReceiver;
 
 import com.onesignal.NotificationBundleProcessor.ProcessedBundleResult;
 
-import java.util.Random;
+import java.security.SecureRandom;
 
 // This is the entry point when a FCM / GCM payload is received from the Google Play services app
 // TODO: 4.0.0 - Update to use <action android:name="com.google.firebase.MESSAGING_EVENT"/>
@@ -66,12 +66,14 @@ public class GcmBroadcastReceiver extends WakefulBroadcastReceiver {
       Bundle bundle = intent.getExtras();
       if (bundle == null || "google.com/iid".equals(bundle.getString("from")))
          return;
+
+      OneSignal.setAppContext(context);
       
       ProcessedBundleResult processedResult = processOrderBroadcast(context, intent, bundle);
       
       // Null means this isn't a GCM / FCM message.
       if (processedResult == null) {
-         setResult(Activity.RESULT_OK);
+         setSuccessfulResultCode();
          return;
       }
       
@@ -93,17 +95,27 @@ public class GcmBroadcastReceiver extends WakefulBroadcastReceiver {
          return;
       }
 
-      setResult(Activity.RESULT_OK);
+      setSuccessfulResultCode();
    }
 
-   private void setResult(int code) {
+   private void setSuccessfulResultCode() {
       if (isOrderedBroadcast())
-         setResultCode(code);
+         setResultCode(Activity.RESULT_OK);
    }
 
    private void setAbort() {
-      if (isOrderedBroadcast())
+      if (isOrderedBroadcast()) {
+         // Prevents other BroadcastReceivers from firing
          abortBroadcast();
+
+         // RESULT_OK prevents the following confusing logcat entry;
+         // W/GCM: broadcast intent callback: result=CANCELLED forIntent {
+         //    act=com.google.android.c2dm.intent.RECEIVE
+         //    flg=0x10000000
+         //    pkg=com.onesignal.example (has extras)
+         // }
+         setResultCode(Activity.RESULT_OK);
+      }
    }
    
    private static ProcessedBundleResult processOrderBroadcast(Context context, Intent intent, Bundle bundle) {
@@ -152,7 +164,7 @@ public class GcmBroadcastReceiver extends WakefulBroadcastReceiver {
 
       ComponentName componentName = new ComponentName(context.getPackageName(),
          GcmIntentJobService.class.getName());
-      Random random = new Random();
+      SecureRandom random = new SecureRandom();
       JobInfo jobInfo = new JobInfo.Builder(random.nextInt(), componentName)
          .setOverrideDeadline(0)
          .setExtras((PersistableBundle)taskExtras.getBundle())

@@ -369,7 +369,7 @@ public class OneSignal {
    private static TrackAmazonPurchase trackAmazonPurchase;
    private static TrackFirebaseAnalytics trackFirebaseAnalytics;
 
-   public static final String VERSION = "031001";
+   public static final String VERSION = "031002";
 
    private static AdvertisingIdentifierProvider mainAdIdProvider = new AdvertisingIdProviderGPS();
 
@@ -522,9 +522,16 @@ public class OneSignal {
       return mInitBuilder;
    }
 
+   // Sets the global shared ApplicationContext for OneSignal
+   // This is set from all OneSignal entry points
+   //   - BroadcastReceivers, Services, and Activities
    static void setAppContext(Context context) {
+      boolean wasAppContextNull = (appContext == null);
       appContext = context.getApplicationContext();
-      OneSignalPrefs.startDelayedWrite();
+
+      // Prefs require a context to save, kick off write in-case it was waiting.
+      if (wasAppContextNull)
+         OneSignalPrefs.startDelayedWrite();
    }
 
    /**
@@ -2027,19 +2034,12 @@ public class OneSignal {
               OneSignalPrefs.PREFS_GT_APP_ID,null);
    }
 
-   static boolean getSavedUserConsentStatus() { return getSavedUserConsentStatus(appContext); }
-
-   private static boolean getSavedUserConsentStatus(Context inContext) {
-      if (inContext == null)
-         return false;
-
+   static boolean getSavedUserConsentStatus() {
       return OneSignalPrefs.getBool(OneSignalPrefs.PREFS_ONESIGNAL, OneSignalPrefs.PREFS_ONESIGNAL_USER_PROVIDED_CONSENT, false);
    }
 
    static void saveUserConsentStatus(boolean consent) {
-      if (appContext == null)
-         return;
-
+      
       OneSignalPrefs.saveBool(OneSignalPrefs.PREFS_ONESIGNAL, OneSignalPrefs.PREFS_ONESIGNAL_USER_PROVIDED_CONSENT, consent);
    }
 
