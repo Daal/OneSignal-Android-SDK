@@ -369,7 +369,7 @@ public class OneSignal {
    private static TrackAmazonPurchase trackAmazonPurchase;
    private static TrackFirebaseAnalytics trackFirebaseAnalytics;
 
-   public static final String VERSION = "031002";
+   public static final String VERSION = "031003";
 
    private static AdvertisingIdentifierProvider mainAdIdProvider = new AdvertisingIdProviderGPS();
 
@@ -2601,10 +2601,6 @@ public class OneSignal {
     */
    public static void addPermissionObserver(OSPermissionObserver observer) {
 
-      //if applicable, check if the user provided privacy consent
-      if (shouldLogUserPrivacyConsentErrorMessageForMethodName("addPermissionObserver()"))
-         return;
-
       if (appContext == null) {
          Log(LOG_LEVEL.ERROR, "OneSignal.init has not been called. Could not add permission observer");
          return;
@@ -2642,10 +2638,6 @@ public class OneSignal {
     */
    public static void addSubscriptionObserver(OSSubscriptionObserver observer) {
 
-      //if applicable, check if the user provided privacy consent
-      if (shouldLogUserPrivacyConsentErrorMessageForMethodName("addSubscriptionObserver()"))
-         return;
-
       if (appContext == null) {
          Log(LOG_LEVEL.ERROR, "OneSignal.init has not been called. Could not add subscription observer");
          return;
@@ -2679,10 +2671,6 @@ public class OneSignal {
     * @param observer the instance of {@link OSSubscriptionObserver} that acts as the observer
     */
    public static void addEmailSubscriptionObserver(@NonNull OSEmailSubscriptionObserver observer) {
-
-      //if applicable, check if the user provided privacy consent
-      if (shouldLogUserPrivacyConsentErrorMessageForMethodName("addEmailSubscriptionObserver()"))
-         return;
 
       if (appContext == null) {
          Log(LOG_LEVEL.ERROR, "OneSignal.init has not been called. Could not add email subscription observer");
