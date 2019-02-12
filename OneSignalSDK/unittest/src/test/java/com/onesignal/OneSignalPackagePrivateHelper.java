@@ -183,4 +183,20 @@ public class OneSignalPackagePrivateHelper {
 
 
    public static void OneSignal_setAppContext(Context context) { OneSignal.setAppContext(context); }
+
+   static public class BadgeCountUpdater extends com.onesignal.BadgeCountUpdater {
+      public static void update(SQLiteDatabase readableDb, Context context) {
+         com.onesignal.BadgeCountUpdater.update(readableDb, context);
+      }
+   }
+
+   static public class NotificationLimitManager extends com.onesignal.NotificationLimitManager {
+      public static void clearOldestOverLimitFallback(Context context, int notifsToMakeRoomFor) {
+         com.onesignal.NotificationLimitManager.clearOldestOverLimitFallback(context, notifsToMakeRoomFor);
+      }
+
+      public static void clearOldestOverLimitStandard(Context context, int notifsToMakeRoomFor) throws Throwable {
+         com.onesignal.NotificationLimitManager.clearOldestOverLimitStandard(context, notifsToMakeRoomFor);
+      }
+   }
 }

@@ -369,7 +369,7 @@ public class OneSignal {
    private static TrackAmazonPurchase trackAmazonPurchase;
    private static TrackFirebaseAnalytics trackFirebaseAnalytics;
 
-   public static final String VERSION = "031003";
+   public static final String VERSION = "031006";
 
    private static AdvertisingIdentifierProvider mainAdIdProvider = new AdvertisingIdProviderGPS();
 
@@ -390,7 +390,7 @@ public class OneSignal {
    private static Collection<JSONArray> unprocessedOpenedNotifis = new ArrayList<>();
    private static HashSet<String> postedOpenedNotifIds = new HashSet<>();
 
-   private static GetTagsHandler pendingGetTagsHandler;
+   private static ArrayList<GetTagsHandler> pendingGetTagsHandlers = new ArrayList<>();
    private static boolean getTagsCall;
 
    private static boolean waitingToPostStateSync;
@@ -525,7 +525,12 @@ public class OneSignal {
    // Sets the global shared ApplicationContext for OneSignal
    // This is set from all OneSignal entry points
    //   - BroadcastReceivers, Services, and Activities
-   static void setAppContext(Context context) {
+   public static void setAppContext(@NonNull Context context) {
+      if (context == null) {
+         Log(LOG_LEVEL.WARN, "setAppContext(null) is not valid, ignoring!");
+         return;
+      }
+
       boolean wasAppContextNull = (appContext == null);
       appContext = context.getApplicationContext();
 
@@ -1424,6 +1429,41 @@ public class OneSignal {
       emailLogout.run();
    }
 
+   public static void setExternalUserId(final String externalId) {
+
+      if (shouldLogUserPrivacyConsentErrorMessageForMethodName("setExternalId()"))
+         return;
+
+      Runnable runSetExternalUserId = new Runnable() {
+         @Override
+         public void run() {
+            try {
+               OneSignalStateSynchronizer.setExternalUserId(externalId);
+            } catch (JSONException exception) {
+               String operation = externalId == "" ? "remove" : "set";
+               onesignalLog(LOG_LEVEL.ERROR, "Attempted to " + operation + " external ID but encountered a JSON exception");
+               exception.printStackTrace();
+            }
+         }
+      };
+
+      // If either the app context is null or the waiting queue isn't done (to preserve operation order)
+      if (appContext == null || shouldRunTaskThroughQueue()) {
+         addTaskToQueue(new PendingTaskRunnable(runSetExternalUserId));
+         return;
+      }
+
+      runSetExternalUserId.run();
+   }
+
+   public static void removeExternalUserId() {
+      if (shouldLogUserPrivacyConsentErrorMessageForMethodName("removeExternalUserId()"))
+         return;
+
+      // to remove the external user ID, the API requires an empty string
+      setExternalUserId("");
+   }
+
    /**
     * Tag a user based on an app event of your choosing so later you can create
     * <a href="https://documentation.onesignal.com/docs/segmentation">OneSignal Segments</a>
@@ -1631,7 +1671,13 @@ public class OneSignal {
       if (shouldLogUserPrivacyConsentErrorMessageForMethodName("getTags()"))
          return;
 
-      pendingGetTagsHandler = getTagsHandler;
+      synchronized (pendingGetTagsHandlers) {
+         pendingGetTagsHandlers.add(getTagsHandler);
+
+         // if there is an existing in-flight request, we should return
+         // since there's no point in making a duplicate runnable
+         if (pendingGetTagsHandlers.size() > 1) return;
+      }
 
       Runnable getTagsRunnable = new Runnable() {
          @Override
@@ -1644,7 +1690,8 @@ public class OneSignal {
             if (getUserId() == null) {
                return;
             }
-            internalFireGetTagsCallback(pendingGetTagsHandler);
+
+            internalFireGetTagsCallbacks();
          }
       };
 
@@ -1658,18 +1705,27 @@ public class OneSignal {
       getTagsRunnable.run();
    }
 
-   private static void internalFireGetTagsCallback(final GetTagsHandler getTagsHandler) {
-      if (getTagsHandler == null) return;
+   private static void internalFireGetTagsCallbacks() {
+      synchronized (pendingGetTagsHandlers) {
+         if (pendingGetTagsHandlers.size() == 0) return;
+      }
 
       new Thread(new Runnable() {
          @Override
          public void run() {
             final UserStateSynchronizer.GetTagsResult tags = OneSignalStateSynchronizer.getTags(!getTagsCall);
             if (tags.serverSuccess) getTagsCall = true;
-            if (tags.result == null || tags.toString().equals("{}"))
-               getTagsHandler.tagsAvailable(null);
-            else
-               getTagsHandler.tagsAvailable(tags.result);
+
+            synchronized (pendingGetTagsHandlers) {
+               for (GetTagsHandler handler : pendingGetTagsHandlers) {
+                  if (tags.result == null || tags.toString().equals("{}"))
+                     handler.tagsAvailable(null);
+                  else
+                     handler.tagsAvailable(tags.result);
+               }
+
+               pendingGetTagsHandlers.clear();
+            }
          }
       }, "OS_GETTAGS_CALLBACK").start();
    }
@@ -2105,7 +2161,7 @@ public class OneSignal {
    static void updateUserIdDependents(String userId) {
       saveUserId(userId);
       fireIdsAvailableCallback();
-      internalFireGetTagsCallback(pendingGetTagsHandler);
+      internalFireGetTagsCallbacks();
    
       getCurrentSubscriptionState(appContext).setUserId(userId);
       
@@ -2344,11 +2400,6 @@ public class OneSignal {
     * your app is restarted.
     */
    public static void clearOneSignalNotifications() {
-
-      //if applicable, check if the user provided privacy consent
-      if (shouldLogUserPrivacyConsentErrorMessageForMethodName("clearOneSignalNotifications()"))
-         return;
-
       Runnable runClearOneSignalNotifications = new Runnable() {
          @Override
          public void run() {
@@ -2431,11 +2482,6 @@ public class OneSignal {
     * @param id
     */
    public static void cancelNotification(final int id) {
-
-      //if applicable, check if the user provided privacy consent
-      if (shouldLogUserPrivacyConsentErrorMessageForMethodName("cancelNotification()"))
-         return;
-
       Runnable runCancelNotification = new Runnable() {
          @Override
          public void run() {
@@ -2470,6 +2516,9 @@ public class OneSignal {
                   }
                }
             }
+
+            NotificationManager notificationManager = (NotificationManager)appContext.getSystemService(Context.NOTIFICATION_SERVICE);
+            notificationManager.cancel(id);
          }
       };
 
@@ -2483,9 +2532,6 @@ public class OneSignal {
       }
 
       runCancelNotification.run();
-
-      NotificationManager notificationManager = (NotificationManager)appContext.getSystemService(Context.NOTIFICATION_SERVICE);
-      notificationManager.cancel(id);
    }
    
    
