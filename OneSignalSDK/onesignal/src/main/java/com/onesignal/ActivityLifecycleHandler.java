@@ -130,7 +130,7 @@ class ActivityLifecycleHandler {
       FocusHandlerThread() {
          super("FocusHandlerThread");
          start();
-         mHandler = new Handler(getLooper());
+         mHandler = new Handler(Looper.getMainLooper());
       }
 
       Looper getHandlerLooper() {

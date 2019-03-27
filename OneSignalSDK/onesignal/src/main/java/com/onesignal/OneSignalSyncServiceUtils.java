@@ -167,13 +167,18 @@ class OneSignalSyncServiceUtils {
 
    private static AtomicBoolean runningOnFocusTime = new AtomicBoolean();
    static void syncOnFocusTime() {
-      if (runningOnFocusTime.get())
-         return;
-      synchronized (runningOnFocusTime) {
-         runningOnFocusTime.set(true);
-         internalSyncOnFocusTime();
-         runningOnFocusTime.set(false);
-      }
+      new Thread(new Runnable() {
+         @Override
+         public void run() {
+            if (runningOnFocusTime.get())
+               return;
+            synchronized (runningOnFocusTime) {
+               runningOnFocusTime.set(true);
+               internalSyncOnFocusTime();
+               runningOnFocusTime.set(false);
+            }
+         }
+      }).start();
    }
 
    private static void internalSyncOnFocusTime() {
