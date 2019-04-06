@@ -81,8 +81,12 @@ class OneSignalChromeTab {
       public void onCustomTabsServiceConnected(ComponentName componentName, CustomTabsClient customTabsClient) {
          if (customTabsClient == null)
             return;
-
-         customTabsClient.warmup(0);
+         try {
+            customTabsClient.warmup(0);
+         } catch (Exception e) {
+            e.printStackTrace();
+            return;
+         }
 
          CustomTabsSession session = customTabsClient.newSession(new CustomTabsCallback()  {
             public void onNavigationEvent(int navigationEvent, Bundle extras) {
