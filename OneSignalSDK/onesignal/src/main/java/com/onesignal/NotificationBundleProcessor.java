@@ -1,7 +1,7 @@
 /**
  * Modified MIT License
  * 
- * Copyright 2018 OneSignal
+ * Copyright 2019 OneSignal
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,6 +40,7 @@ import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.SystemClock;
 
 import java.util.ArrayList;
 import java.util.Set;
@@ -175,6 +176,12 @@ class NotificationBundleProcessor {
                values.put(NotificationTable.COLUMN_NAME_TITLE, notifiJob.getTitle().toString());
             if (notifiJob.getBody() != null)
                values.put(NotificationTable.COLUMN_NAME_MESSAGE, notifiJob.getBody().toString());
+
+            // Set expire_time
+            long sentTime = jsonPayload.optLong("google.sent_time", SystemClock.currentThreadTimeMillis()) / 1_000L;
+            int ttl = jsonPayload.optInt("google.ttl", NotificationRestorer.DEFAULT_TTL_IF_NOT_IN_PAYLOAD);
+            long expireTime = sentTime + ttl;
+            values.put(NotificationTable.COLUMN_NAME_EXPIRE_TIME, expireTime);
 
             values.put(NotificationTable.COLUMN_NAME_FULL_DATA, jsonPayload.toString());
 

@@ -1,7 +1,7 @@
 /**
  * Modified MIT License
  * 
- * Copyright 2018 OneSignal
+ * Copyright 2019 OneSignal
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -344,7 +344,6 @@ public class OneSignal {
 
    static String appId;
    private static String mGoogleProjectNumber;
-   private static boolean mGoogleProjectNumberIsRemote;
    static Context appContext;
    
    private static LOG_LEVEL visualLogLevel = LOG_LEVEL.NONE;
@@ -369,7 +368,7 @@ public class OneSignal {
    private static TrackAmazonPurchase trackAmazonPurchase;
    private static TrackFirebaseAnalytics trackFirebaseAnalytics;
 
-   public static final String VERSION = "031006";
+   public static final String VERSION = "031007";
 
    private static AdvertisingIdentifierProvider mainAdIdProvider = new AdvertisingIdProviderGPS();
 
@@ -380,7 +379,7 @@ public class OneSignal {
    private static OSUtils osUtils;
 
    private static String lastRegistrationId;
-   private static boolean registerForPushFired, locationFired, awlFired, promptedLocation;
+   private static boolean registerForPushFired, locationFired, promptedLocation;
    
    private static LocationGMS.LocationPoint lastLocationPoint;
    
@@ -394,14 +393,11 @@ public class OneSignal {
    private static boolean getTagsCall;
 
    private static boolean waitingToPostStateSync;
-   private static boolean sendAsSession;
-
-   private static JSONObject awl;
-   static boolean mEnterp;
-   private static boolean useEmailAuth;
 
    static boolean requiresUserPrivacyConsent = false;
    static DelayedConsentInitializationParameters delayedInitParams;
+
+   static OneSignalRemoteParams.Params remoteParams;
    
    // Start PermissionState
    private static OSPermissionState currentPermissionState;
@@ -609,7 +605,11 @@ public class OneSignal {
       mInitBuilder.mDisplayOptionCarryOver = false;
       mInitBuilder.mNotificationOpenedHandler = notificationOpenedHandler;
       mInitBuilder.mNotificationReceivedHandler = notificationReceivedHandler;
-      if (!mGoogleProjectNumberIsRemote)
+
+      boolean isGoogleProjectNumberRemote =
+         remoteParams != null &&
+         remoteParams.googleProjectNumber != null;
+      if (!isGoogleProjectNumberRemote)
          mGoogleProjectNumber = googleProjectNumber;
 
       osUtils = new OSUtils();
@@ -667,7 +667,8 @@ public class OneSignal {
       OSPermissionChangedInternalObserver.handleInternalChanges(getCurrentPermissionState(appContext));
 
       if (foreground || getUserId() == null) {
-         sendAsSession = isPastOnSessionTime();
+         if (isPastOnSessionTime())
+            OneSignalStateSynchronizer.setNewSession();
          setLastSessionTime(System.currentTimeMillis());
          startRegistrationOrOnSession();
       }
@@ -762,17 +763,15 @@ public class OneSignal {
    private static void startRegistrationOrOnSession() {
       if (waitingToPostStateSync)
          return;
-
       waitingToPostStateSync = true;
 
-      registerForPushFired = false;
-      if (sendAsSession)
+      if (OneSignalStateSynchronizer.getSyncAsNewSession())
          locationFired = false;
 
       startLocationUpdate();
-      makeAndroidParamsRequest();
 
-      promptedLocation = promptedLocation || mInitBuilder.mPromptLocation;
+      registerForPushFired = false;
+      makeAndroidParamsRequest();
    }
 
    private static void startLocationUpdate() {
@@ -789,6 +788,9 @@ public class OneSignal {
          }
       };
       boolean doPrompt = mInitBuilder.mPromptLocation && !promptedLocation;
+      // Prompted so we don't ask for permissions more than once
+      promptedLocation = promptedLocation || mInitBuilder.mPromptLocation;
+
       LocationGMS.getLocation(appContext, doPrompt, locationHandler);
    }
 
@@ -836,71 +838,38 @@ public class OneSignal {
       return subscribableStatus < -6;
    }
 
-   private static int androidParamsReties = 0;
-
    private static void makeAndroidParamsRequest() {
-      if (awlFired) {
-         // Only ever call android_params endpoint once per cold start.
-         //   Re-register for push token to be safe.
+      if (remoteParams != null) {
          registerForPushToken();
          return;
       }
 
-      OneSignalRestClient.ResponseHandler responseHandler = new OneSignalRestClient.ResponseHandler() {
+      OneSignalRemoteParams.makeAndroidParamsRequest(new OneSignalRemoteParams.CallBack() {
          @Override
-         void onFailure(int statusCode, String response, Throwable throwable) {
-            new Thread(new Runnable() {
-               public void run() {
-                  try {
-                     int sleepTime = 30000 + androidParamsReties * 10000;
-                     
-                     if (sleepTime > 90000)
-                        sleepTime = 90000;
-                     
-                     OneSignal.Log(LOG_LEVEL.INFO, "Failed to get Android parameters, trying again in " + (sleepTime / 1000) +  " seconds.");
-                     Thread.sleep(sleepTime);
-                  } catch (Throwable t) {}
-                  androidParamsReties++;
-                  makeAndroidParamsRequest();
-               }
-            }, "OS_PARAMS_REQUEST").start();
-         }
+         public void complete(OneSignalRemoteParams.Params params) {
+            remoteParams = params;
+            if (remoteParams.googleProjectNumber != null)
+               mGoogleProjectNumber = remoteParams.googleProjectNumber;
 
-         @Override
-         void onSuccess(String response) {
-            try {
-               JSONObject responseJson = new JSONObject(response);
-               if (responseJson.has("android_sender_id")) {
-                  mGoogleProjectNumberIsRemote = true;
-                  mGoogleProjectNumber = responseJson.getString("android_sender_id");
-               }
-               
-               mEnterp = responseJson.optBoolean("enterp", false);
+            OneSignalPrefs.saveBool(
+               OneSignalPrefs.PREFS_ONESIGNAL,
+               OneSignalPrefs.PREFS_GT_FIREBASE_TRACKING_ENABLED,
+               remoteParams.firebaseAnalytics
+            );
+            OneSignalPrefs.saveBool(
+               OneSignalPrefs.PREFS_ONESIGNAL,
+               OneSignalPrefs.PREFS_OS_RESTORE_TTL_FILTER,
+               remoteParams.restoreTTLFilter
+            );
 
-               useEmailAuth = responseJson.optBoolean("use_email_auth", false);
-               
-               awl = responseJson.getJSONObject("awl_list");
-   
-               boolean firebaseAnalytics = responseJson.optBoolean("fba", false);
-               OneSignalPrefs.saveBool(OneSignalPrefs.PREFS_ONESIGNAL,
-                   OneSignalPrefs.PREFS_GT_FIREBASE_TRACKING_ENABLED, firebaseAnalytics);
-   
-               NotificationChannelManager.processChannelList(appContext, responseJson);
-            } catch (Throwable t) {
-               t.printStackTrace();
-            }
-            awlFired = true;
+            NotificationChannelManager.processChannelList(
+               OneSignal.appContext,
+               params.notificationChannels
+            );
             registerForPushToken();
          }
-      };
+      });
 
-      String awl_url = "apps/" + appId + "/android_params.js";
-      String userId = getUserId();
-      if (userId != null)
-         awl_url += "?player_id=" + userId;
-   
-      OneSignal.Log(LOG_LEVEL.DEBUG, "Starting request to get Android parameters.");
-      OneSignalRestClient.get(awl_url, responseHandler);
    }
 
    private static void fireCallbackForOpenedNotifications() {
@@ -1074,6 +1043,7 @@ public class OneSignal {
    static boolean onAppLostFocus() {
       foreground = false;
 
+      setLastSessionTime(System.currentTimeMillis());
       LocationGMS.onFocusChange();
 
       if (!initDone) return false;
@@ -1095,8 +1065,6 @@ public class OneSignal {
       }
 
       boolean scheduleSyncService = scheduleSyncService();
-
-      setLastSessionTime(System.currentTimeMillis());
 
       long unSentActiveTime = GetUnsentActiveTime();
       long totalTimeActive = unSentActiveTime + time_elapsed;
@@ -1171,7 +1139,8 @@ public class OneSignal {
 
       lastTrackedFocusTime = SystemClock.elapsedRealtime();
 
-      sendAsSession = isPastOnSessionTime();
+      if (isPastOnSessionTime())
+         OneSignalStateSynchronizer.setNewSession();
       setLastSessionTime(System.currentTimeMillis());
 
       startRegistrationOrOnSession();
@@ -1210,9 +1179,9 @@ public class OneSignal {
    }
 
    private static void registerUser() {
-      Log(LOG_LEVEL.DEBUG, "registerUser: registerForPushFired:" + registerForPushFired + ", locationFired: " + locationFired + ", awlFired: " + awlFired);
+      Log(LOG_LEVEL.DEBUG, "registerUser: registerForPushFired:" + registerForPushFired + ", locationFired: " + locationFired + ", remoteParams: " + remoteParams);
 
-      if (!registerForPushFired || !locationFired || !awlFired)
+      if (!registerForPushFired || !locationFired || remoteParams == null)
          return;
 
       new Thread(new Runnable() {
@@ -1257,7 +1226,7 @@ public class OneSignal {
          for (int i = 0; i < packList.size(); i++) {
             md.update(packList.get(i).packageName.getBytes());
             String pck = Base64.encodeToString(md.digest(), Base64.NO_WRAP);
-            if (awl.has(pck))
+            if (remoteParams.awl.has(pck))
                pkgs.put(pck);
          }
          deviceInfo.put("pkgs", pkgs);
@@ -1279,8 +1248,7 @@ public class OneSignal {
       if (shareLocation && lastLocationPoint != null)
          OneSignalStateSynchronizer.updateLocation(lastLocationPoint);
 
-      if (sendAsSession)
-         OneSignalStateSynchronizer.setSyncAsNewSession();
+      OneSignalStateSynchronizer.readyToUpdate(true);
 
       waitingToPostStateSync = false;
    }
@@ -1353,7 +1321,7 @@ public class OneSignal {
          return;
       }
 
-      if (useEmailAuth && emailAuthHash == null) {
+      if (remoteParams != null && remoteParams.useEmailAuth && emailAuthHash == null) {
          String errorMessage = "Email authentication (auth token) is set to REQUIRED for this application. Please provide an auth token from your backend server or change the setting in the OneSignal dashboard.";
          if (callback != null)
             callback.onFailure(new EmailUpdateError(EmailErrorType.REQUIRES_EMAIL_AUTH, errorMessage));
@@ -2868,16 +2836,8 @@ public class OneSignal {
       return initDone && isForeground();
    }
 
-   static void updateOnSessionDependents() {
-      sendAsSession = false;
-      setLastSessionTime(System.currentTimeMillis());
-   }
-
    private static boolean isPastOnSessionTime() {
-      if (sendAsSession)
-         return true;
-
-      return (System.currentTimeMillis() - getLastSessionTime(appContext)) / 1000 >= MIN_ON_SESSION_TIME;
+      return (System.currentTimeMillis() - getLastSessionTime(appContext)) / 1_000 >= MIN_ON_SESSION_TIME;
    }
    
    // Extra check to make sure we don't unsubscribe devices that rely on silent background notifications.

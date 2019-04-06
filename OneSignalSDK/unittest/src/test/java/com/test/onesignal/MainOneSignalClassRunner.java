@@ -41,7 +41,6 @@ import android.database.sqlite.SQLiteDatabase;
 import android.location.Location;
 import android.net.ConnectivityManager;
 import android.os.Bundle;
-import android.util.Log;
 
 import com.onesignal.BuildConfig;
 import com.onesignal.OSEmailSubscriptionObserver;
@@ -119,6 +118,7 @@ import static com.test.onesignal.GenerateNotificationRunner.getBaseNotifBundle;
 import static com.test.onesignal.TestHelpers.afterTestCleanup;
 import static com.test.onesignal.TestHelpers.fastAppRestart;
 import static com.test.onesignal.TestHelpers.flushBufferedSharedPrefs;
+import static com.test.onesignal.TestHelpers.stopAllOSThreads;
 import static junit.framework.Assert.assertEquals;
 import static junit.framework.Assert.assertFalse;
 import static junit.framework.Assert.assertNotNull;
@@ -344,6 +344,69 @@ public class MainOneSignalClassRunner {
       assertEquals("{\"carrier\":\"test2\",\"app_id\":\"b2f7f966-d8cc-11e4-bed1-df8f05be55ba\"}", ShadowOneSignalRestClient.lastPost.toString());
    }
 
+   @Test
+   public void testCreatesEvenIfAppIsQuicklyForceKilledOnFirstLaunch() throws Exception {
+      // 1. App cold restarted before the device has a chance to create a player
+      OneSignalInit();
+      fastAppRestart();
+
+      // 2. 2nd cold start of the app.
+      OneSignalInit();
+      threadAndTaskWait();
+
+      // 3. Ensure we made 3 network calls. (2 to android_params and 1 create player call)
+      assertEquals(3, ShadowOneSignalRestClient.networkCallCount);
+      assertEquals("players", ShadowOneSignalRestClient.lastUrl);
+      assertEquals(REST_METHOD.POST, ShadowOneSignalRestClient.requests.get(2).method);
+   }
+
+   @Test
+   public void testOnSessionEvenIfQuickAppRestart() throws Exception {
+      // 1. Do app first start and register the device for a player id
+      OneSignalInit();
+      threadAndTaskWait();
+
+      restartAppAndElapseTimeToNextSession();
+
+      // 2. App is restarted before it can make it's on_session call
+      OneSignalInit();
+      stopAllOSThreads();
+      fastAppRestart();
+
+      // 3. 3rd start of the app, we should make an on_session call since the last one did not go through
+      OneSignalInit();
+      threadAndTaskWait();
+
+      // 4. Ensure we made 4 network calls. (2 to android_params and 1 create player call)
+      assertEquals(5, ShadowOneSignalRestClient.networkCallCount);
+      GetIdsAvailable();
+      assertEquals("players/" + callBackUseId + "/on_session", ShadowOneSignalRestClient.lastUrl);
+      assertEquals(REST_METHOD.POST, ShadowOneSignalRestClient.requests.get(4).method);
+   }
+
+   @Test
+   public void testOnSessionFlagIsClearedAfterSuccessfullySynced() throws Exception {
+      // 1. App cold restarted before the device has a chance to create a player
+      OneSignalInit();
+      fastAppRestart();
+
+      // 2. 2nd cold start of the app, waiting to make sure device gets registered
+      OneSignalInit();
+      threadAndTaskWait();
+
+      // 3. Restart the app without wating.
+      fastAppRestart();
+
+      // 4. 3rd cold start of the app.
+      OneSignalInit();
+      threadAndTaskWait();
+
+      // 4. Ensure we made 4 network calls. (3 to android_params and 1 create player call)
+      //    We are making sure we are only making on create call and NO on_session calls
+      assertEquals(4, ShadowOneSignalRestClient.networkCallCount);
+      assertEquals("players", ShadowOneSignalRestClient.requests.get(2).url);
+      assertEquals(REST_METHOD.POST, ShadowOneSignalRestClient.requests.get(2).method);
+   }
 
    @Test
    public void testPutCallsMadeWhenUserStateChangesOnAppResume() throws Exception {
@@ -1933,6 +1996,30 @@ public class MainOneSignalClassRunner {
       assertSuccessfulOnFocus(ShadowOneSignalRestClient.requests.get(3));
    }
 
+   @Test
+   public void ensureNoRetriesForAndroidParamsOn403() throws Exception {
+      ShadowOneSignalRestClient.failGetParams = true;
+      ShadowOneSignalRestClient.failHttpCode = 403;
+
+      OneSignalInit();
+      threadAndTaskWait();
+
+      assertEquals(1, ShadowOneSignalRestClient.requests.size());
+   }
+
+   @Test
+   public void ensureNoRetriesForPlayerUpdatesOn403() throws Exception {
+      OneSignalInit();
+      threadAndTaskWait();
+
+      ShadowOneSignalRestClient.failAll = true;
+      ShadowOneSignalRestClient.failHttpCode = 403;
+      OneSignal.sendTag("key", "value");
+      threadAndTaskWait();
+
+      // 1. Android Param success. 2. player create success. 3. On call to update which fails without retrying.
+      assertEquals(3, ShadowOneSignalRestClient.requests.size());
+   }
 
    @Test
    @Config(sdk = 26)
@@ -2676,11 +2763,10 @@ public class MainOneSignalClassRunner {
       restartAppAndElapseTimeToNextSession();
       ShadowGoogleApiClientCompatProxy.skipOnConnected = true;
       OneSignalInit();
-
-      // TODO: Other, this sync seems to not omit PUT when there isn't anything to change....
+      
       SyncJobService syncJobService = Robolectric.buildService(SyncJobService.class).create().get();
       syncJobService.onStartJob(null);
-      Thread.sleep(1_000); // Short sleep to wait for the Thread in the job to run
+      TestHelpers.getThreadByName("OS_SYNCSRV_BG_SYNC").join();
       OneSignalPackagePrivateHelper.runAllNetworkRunnables();
       ShadowGoogleApiClientBuilder.connectionCallback.onConnected(null);
       threadAndTaskWait();

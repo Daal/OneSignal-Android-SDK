@@ -146,20 +146,24 @@ public class OneSignalPackagePrivateHelper {
 
    public static class PushRegistratorGCM extends com.onesignal.PushRegistratorGCM {}
 
+   public static class OneSignalRestClient extends com.onesignal.OneSignalRestClient {
+      public static abstract class ResponseHandler extends com.onesignal.OneSignalRestClient.ResponseHandler {
+         @Override
+         public void onSuccess(String response) {}
+         @Override
+         public void onFailure(int statusCode, String response, Throwable throwable) {}
+      }
+   }
+
    public static String NotificationChannelManager_createNotificationChannel(Context context, JSONObject payload) {
       NotificationGenerationJob notifJob = new NotificationGenerationJob(context);
       notifJob.jsonPayload = payload;
       return NotificationChannelManager.createNotificationChannel(notifJob);
    }
    
-   public static void NotificationChannelManager_processChannelList(Context context, JSONObject jsonObject) {
-      NotificationChannelManager.processChannelList(context, jsonObject);
+   public static void NotificationChannelManager_processChannelList(Context context, JSONArray jsonArray) {
+      NotificationChannelManager.processChannelList(context, jsonArray);
    }
-   
-   public static void OneSignalRestClientPublic_getSync(final String url, final OneSignalRestClient.ResponseHandler responseHandler) {
-      OneSignalRestClient.getSync(url, responseHandler);
-   }
-   
    
    public static void NotificationOpenedProcessor_processFromContext(Context context, Intent intent) {
       NotificationOpenedProcessor.processFromContext(context, intent);
@@ -199,4 +203,6 @@ public class OneSignalPackagePrivateHelper {
          com.onesignal.NotificationLimitManager.clearOldestOverLimitStandard(context, notifsToMakeRoomFor);
       }
    }
+
+   public class OneSignalDbContract extends com.onesignal.OneSignalDbContract {}
 }
