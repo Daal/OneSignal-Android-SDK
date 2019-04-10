@@ -210,10 +210,15 @@ class OneSignalSyncServiceUtils {
     * Subclasses should override only the stopSync() method
     */
    static abstract class SyncRunnable implements Runnable {
+      private boolean callbackCalled = false;
+      private final Object lockObject = new Object();
+      private LocationGMS.LocationPoint point = null;
+
       @Override
       public final void run() {
          synchronized (nextScheduledSyncTime) {
             nextScheduledSyncTime = 0L;
+             callbackCalled = false;
          }
          if (OneSignal.getUserId() == null) {
             stopSync();
@@ -231,17 +236,34 @@ class OneSignalSyncServiceUtils {
 
             @Override
             public void complete(LocationGMS.LocationPoint point) {
-               if (point != null)
-                  OneSignalStateSynchronizer.updateLocation(point);
+               callbackCalled = true;
+               SyncRunnable.this.point = point;
 
-               // Both these calls are synchronous.
-               //   Thread is blocked until network calls are made or their retry limits are reached
-               OneSignalStateSynchronizer.syncUserState(true);
-               OneSignalSyncServiceUtils.syncOnFocusTime();
-               stopSync();
+               synchronized (lockObject) {
+                  lockObject.notify();
+               }
             }
          };
          LocationGMS.getLocation(OneSignal.appContext, false, locationHandler);
+         if (!callbackCalled) {
+            synchronized (lockObject) {
+               try {
+                  lockObject.wait();
+               } catch (InterruptedException ignored) {
+               }
+            }
+         } else {
+             callbackCalled = false;
+         }
+
+         if (point != null)
+            OneSignalStateSynchronizer.updateLocation(point);
+
+         // Both these calls are synchronous.
+         //   Thread is blocked until network calls are made or their retry limits are reached
+         OneSignalStateSynchronizer.syncUserState(true);
+         OneSignalSyncServiceUtils.syncOnFocusTime();
+         stopSync();
       }
 
       protected abstract void stopSync();
