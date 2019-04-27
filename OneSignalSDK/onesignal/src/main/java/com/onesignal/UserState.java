@@ -163,14 +163,19 @@ abstract class UserState {
 
                 dependValues.put("subscribableStatus", subscribableStatus);
                 dependValues.put("userSubscribePref", userSubscribePref);
-            } catch (JSONException e) {}
-        }
-        else {
+            } catch (JSONException e) {
+                OneSignal.Log(OneSignal.LOG_LEVEL.ERROR, "cannot write prefs value in dependValues", e);
+            }
+        } else {
             try {
                 dependValues = new JSONObject(dependValuesStr);
             } catch (JSONException e) {
-                e.printStackTrace();
+                OneSignal.Log(OneSignal.LOG_LEVEL.ERROR, "cannot write prefs value in dependValues", e);
             }
+        }
+
+        if (dependValues == null) {
+            dependValues = new JSONObject();
         }
 
         String syncValuesStr = OneSignalPrefs.getString(OneSignalPrefs.PREFS_ONESIGNAL,
@@ -185,7 +190,8 @@ abstract class UserState {
             else
                 syncValues = new JSONObject(syncValuesStr);
         } catch (JSONException e) {
-            e.printStackTrace();
+            syncValues = new JSONObject();
+            OneSignal.Log(OneSignal.LOG_LEVEL.ERROR, "cannot write prefs value in syncValues", e);
         }
     }
 
